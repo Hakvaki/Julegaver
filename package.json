@@ -1,0 +1,15 @@
+{
+  "name": "julegaver",
+  "version": "1.0.0",
+  "description": "Julegave-nettside for familien: ønskelister, hemmelig avkryssing av kjøp og spleising på gaver",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
