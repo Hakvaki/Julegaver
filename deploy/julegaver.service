@@ -1,0 +1,19 @@
+[Unit]
+Description=Julegaver - julegaveliste for familien
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/julegaver
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+Environment=DB_PATH=/opt/julegaver/data/julegaver.db
+Environment=COOKIE_SECURE=1
+# Juster ExecStart til hvor node ligger (f.eks. `which node`).
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
+Restart=always
+RestartSec=5
+User=julegaver
+
+[Install]
+WantedBy=multi-user.target

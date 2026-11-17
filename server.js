@@ -28,6 +28,8 @@ function createApp(dbPath) {
           cookies,
           user: getSessionUser(db, cookies[SESSION_COOKIE]),
           body: {},
+          ip: String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '',
+          secureCookie: process.env.COOKIE_SECURE === '1' || req.headers['x-forwarded-proto'] === 'https',
         };
         if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
           ctx.body = await readBody(req);

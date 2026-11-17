@@ -6,10 +6,12 @@ const { createApp } = require('../server');
 
 let server;
 let base;
+let db;
 
 before(async () => {
   const app = createApp(':memory:');
   server = app.server;
+  db = app.db;
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -20,8 +22,8 @@ class Client {
   constructor() {
     this.cookie = null;
   }
-  async req(path, { method = 'GET', body } = {}) {
-    const headers = {};
+  async req(path, { method = 'GET', body, headers: extraHeaders } = {}) {
+    const headers = { ...extraHeaders };
     if (this.cookie) headers.cookie = this.cookie;
     if (body) headers['content-type'] = 'application/json';
     const res = await fetch(base + path, {
@@ -40,7 +42,7 @@ class Client {
     }
     let data = null;
     try { data = await res.json(); } catch { /* ignore */ }
-    return { status: res.status, data };
+    return { status: res.status, data, setCookies };
   }
   post(path, body) { return this.req(path, { method: 'POST', body }); }
   put(path, body) { return this.req(path, { method: 'PUT', body }); }
@@ -310,4 +312,50 @@ test('statiske filer serveres', async () => {
   assert.equal(resJs.status, 200);
   const resTraversal = await fetch(base + '/../server.js');
   assert.equal(resTraversal.status, 404);
+});
+
+test('sesjonstoken lagres kun hashet i databasen', async () => {
+  const c = new Client();
+  const res = await c.post('/api/auth/register', { username: 'hashuser', password: 'passord123' });
+  assert.equal(res.status, 200);
+  const cookieToken = c.cookie.split('=')[1];
+  const rows = db.prepare('SELECT token FROM sessions').all();
+  assert.ok(rows.length > 0);
+  assert.ok(rows.every((r) => r.token !== cookieToken));
+  assert.ok(rows.every((r) => /^[a-f0-9]{64}$/.test(r.token)));
+  const me = await c.req('/api/me');
+  assert.equal(me.status, 200);
+  assert.equal(me.data.user.username, 'hashuser');
+});
+
+test('HTTPS (x-forwarded-proto) gir Secure-flagg på sesjons-cookie', async () => {
+  const c = new Client();
+  const res = await c.req('/api/auth/register', {
+    method: 'POST',
+    body: { username: 'secureuser', password: 'passord123' },
+    headers: { 'x-forwarded-proto': 'https' },
+  });
+  assert.equal(res.status, 200);
+  const sessionCookieHeader = res.setCookies.find((c2) => c2.startsWith('julegaver_session='));
+  assert.ok(sessionCookieHeader);
+  assert.match(sessionCookieHeader, /Secure/);
+  assert.match(sessionCookieHeader, /HttpOnly/);
+
+  const plain = new Client();
+  const res2 = await plain.post('/api/auth/register', { username: 'plainuser', password: 'passord123' });
+  const plainCookie = res2.setCookies.find((c2) => c2.startsWith('julegaver_session='));
+  assert.ok(plainCookie);
+  assert.doesNotMatch(plainCookie, /Secure/);
+});
+
+test('innlogging er rate-limitet etter mange feilede forsøk', async () => {
+  const c = new Client();
+  await c.post('/api/auth/register', { username: 'rateuser', password: 'passord123' });
+  let last;
+  for (let i = 0; i < 12; i++) {
+    last = await c.post('/api/auth/login', { username: 'rateuser', password: 'feil passord' });
+  }
+  assert.equal(last.status, 429);
+  const withCorrectPassword = await c.post('/api/auth/login', { username: 'rateuser', password: 'passord123' });
+  assert.equal(withCorrectPassword.status, 429);
 });

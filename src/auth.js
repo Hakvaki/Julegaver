@@ -22,6 +22,10 @@ function newId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 function makeInviteCode() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = crypto.randomBytes(8);
@@ -35,7 +39,7 @@ function createSession(db, userId) {
   const now = Date.now();
   db.prepare(
     'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
-  ).run(token, userId, now, now + SESSION_TTL_MS);
+  ).run(hashToken(token), userId, now, now + SESSION_TTL_MS);
   return { token, expiresAt: now + SESSION_TTL_MS };
 }
 
@@ -47,17 +51,17 @@ function getSessionUser(db, token) {
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ?`
     )
-    .get(token);
+    .get(hashToken(token));
   if (!row) return null;
   if (row.expires_at < Date.now()) {
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    db.prepare('DELETE FROM sessions WHERE token = ?').run(row.token);
     return null;
   }
   return { id: row.id, username: row.username, created_at: row.created_at };
 }
 
 function destroySession(db, token) {
-  if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(hashToken(token));
 }
 
 function parseCookies(req) {
@@ -71,13 +75,14 @@ function parseCookies(req) {
   return cookies;
 }
 
-function sessionCookie(token, maxAgeSeconds) {
+function sessionCookie(token, maxAgeSeconds, secure = false) {
   const parts = [
     `${SESSION_COOKIE}=${token}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
   ];
+  if (secure) parts.push('Secure');
   if (typeof maxAgeSeconds === 'number') parts.push(`Max-Age=${maxAgeSeconds}`);
   return parts.join('; ');
 }
@@ -88,6 +93,7 @@ module.exports = {
   hashPassword,
   verifyPassword,
   newId,
+  hashToken,
   makeInviteCode,
   createSession,
   getSessionUser,

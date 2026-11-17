@@ -1,0 +1,6 @@
+# Erstatt julegaver.example.com med ditt eget domene/subdomene.
+# Caddy skaffer og fornyer HTTPS-sertifikat (Let's Encrypt) automatisk.
+# Appen lytter på 127.0.0.1:3000; Caddy står for TLS utad.
+julegaver.example.com {
+	reverse_proxy 127.0.0.1:3000
+}

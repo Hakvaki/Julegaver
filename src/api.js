@@ -15,6 +15,28 @@ const {
 
 const USERNAME_RE = /^[\p{L}\p{N}_.-]{2,30}$/u;
 
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const loginFailures = new Map();
+
+function tooManyLoginAttempts(ip) {
+  const rec = loginFailures.get(ip);
+  if (!rec) return false;
+  if (Date.now() > rec.resetAt) {
+    loginFailures.delete(ip);
+    return false;
+  }
+  return rec.count >= LOGIN_MAX_FAILURES;
+}
+
+function noteLoginFailure(ip) {
+  const now = Date.now();
+  let rec = loginFailures.get(ip);
+  if (!rec || now > rec.resetAt) rec = { count: 0, resetAt: now + LOGIN_WINDOW_MS };
+  rec.count += 1;
+  loginFailures.set(ip, rec);
+}
+
 function cleanString(value, max) {
   if (typeof value !== 'string') return '';
   return value.trim().slice(0, max);
@@ -206,24 +228,30 @@ function registerRoutes(router, db) {
       throw err;
     }
     const session = createSession(db, id);
-    sendAuth(res, { id, username, created_at: Date.now() }, session);
+    sendAuth(res, { id, username, created_at: Date.now() }, session, ctx.secureCookie);
   });
 
   router.add('POST', '/api/auth/login', (req, res, ctx) => {
+    const ip = ctx.ip || 'unknown';
+    if (tooManyLoginAttempts(ip)) {
+      throw new HttpError(429, 'For mange innloggingsforsøk - prøv igjen om noen minutter');
+    }
     const username = cleanString(ctx.body.username, 30);
     const password = typeof ctx.body.password === 'string' ? ctx.body.password : '';
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
     if (!user || !verifyPassword(password, user.password_hash)) {
+      noteLoginFailure(ip);
       throw new HttpError(401, 'Feil brukernavn eller passord');
     }
+    loginFailures.delete(ip);
     const session = createSession(db, user.id);
-    sendAuth(res, { id: user.id, username: user.username, created_at: user.created_at }, session);
+    sendAuth(res, { id: user.id, username: user.username, created_at: user.created_at }, session, ctx.secureCookie);
   });
 
   router.add('POST', '/api/auth/logout', (req, res, ctx) => {
     const cookies = ctx.cookies;
     destroySession(db, cookies[SESSION_COOKIE]);
-    sendJson(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0) });
+    sendJson(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0, ctx.secureCookie) });
   });
 
   router.add('GET', '/api/me', (req, res, ctx) => {
@@ -518,12 +546,12 @@ function validateItemInput(body) {
   };
 }
 
-function sendAuth(res, user, session) {
+function sendAuth(res, user, session, secure = false) {
   sendJson(
     res,
     200,
     { user },
-    { 'Set-Cookie': sessionCookie(session.token, Math.floor(SESSION_TTL_MS / 1000)) }
+    { 'Set-Cookie': sessionCookie(session.token, Math.floor(SESSION_TTL_MS / 1000), secure) }
   );
 }
 

@@ -91,7 +91,8 @@ function createRouter() {
 function serveStatic(req, res, publicDir, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
   const filePath = path.normalize(path.join(publicDir, rel));
-  if (!filePath.startsWith(publicDir)) {
+  const relCheck = path.relative(publicDir, filePath);
+  if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
     sendJson(res, 403, { error: 'Forbudt' });
     return;
   }
